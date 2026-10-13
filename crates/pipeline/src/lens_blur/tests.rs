@@ -214,6 +214,11 @@ fn lens_blur_and_hdr_overlays_have_distinct_worker_and_cache_ids() {
     let (kind, value) = a.to_parts();
     assert_eq!(kind, 6, "worker kind 5 belongs to upstream AllMasks");
     assert_eq!(crate::Overlay::from_parts(kind, value), a);
+    let masks = crate::Overlay::AllMasks { view: crate::visualize::MaskView::Color, color: [255, 0, 0], opacity: 50 };
+    assert_ne!(a.key(), masks.key());
+    assert_ne!(a.to_parts().0, masks.to_parts().0);
+    let (kind, value) = masks.to_parts();
+    assert_eq!(crate::Overlay::from_parts(kind, value), masks);
 }
 
 #[test]
