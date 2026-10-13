@@ -65,6 +65,8 @@ fn save_delete_library_reimport_restores_edits() {
     s.execute("develop.set", &json!({"control": "light.exposure", "value": 0.8})).unwrap();
     s.execute("develop.set", &json!({"control": "effects.clarity", "value": 25})).unwrap();
     s.execute("mask.add", &json!({"kind": "radial"})).unwrap();
+    s.execute("lensBlur.configure", &json!({"enabled":true,"mode":"manual","bokeh":"fiveBlade"})).unwrap();
+    s.execute("lensBlur.brushStroke", &json!({"points":[[0.2,0.3],[0.3,0.4]]})).unwrap();
     let edited = s.catalog.photo(id).unwrap().clone();
     let r = s.execute("photo.saveMetadataToFile", &json!({})).unwrap();
     assert_eq!(r["written"][0], src.join("dune.xmp").to_string_lossy().as_ref(), "{r}");

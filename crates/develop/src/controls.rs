@@ -28,6 +28,7 @@ pub enum Section {
     Calibration,
     PointColor,
     RedEye,
+    LensBlur,
 }
 
 impl Section {
@@ -49,6 +50,7 @@ impl Section {
             Section::Calibration => "Calibration",
             Section::PointColor => "Point Color",
             Section::RedEye => "Red Eye",
+            Section::LensBlur => "Lens Blur",
         }
     }
 }
@@ -168,6 +170,16 @@ macro_rules! controls {
 use Track::*;
 
 controls! {
+    "lensBlur.amount" => lens_blur.amount, "Blur Amount", LensBlur, 0, 100, 0, 1, 0, Plain;
+    "lensBlur.boost" => lens_blur.boost, "Highlight Boost", LensBlur, 0, 100, 0, 1, 0, Plain;
+    "lensBlur.focalDistance" => lens_blur.focal_distance, "Focus Position", LensBlur, 0, 100, 0, 1, 0, Plain;
+    "lensBlur.focalRange" => lens_blur.focal_range, "Focus Range", LensBlur, 0, 100, 0, 1, 0, Plain;
+    "lensBlur.radiusX" => lens_blur.radius_x, "Focus Width", LensBlur, 0.02, 1, 0.28, 0.01, 2, Plain;
+    "lensBlur.radiusY" => lens_blur.radius_y, "Focus Height", LensBlur, 0.02, 1, 0.38, 0.01, 2, Plain;
+    "lensBlur.feather" => lens_blur.feather, "Focus Feather", LensBlur, 0, 100, 30, 1, 0, Plain;
+    "lensBlur.brushSize" => lens_blur.brush_size, "Brush Size", LensBlur, 0.002, 0.25, 0.03, 0.002, 3, Plain;
+    "lensBlur.brushFeather" => lens_blur.brush_feather, "Brush Feather", LensBlur, 0, 100, 50, 1, 0, Plain;
+    "lensBlur.brushFlow" => lens_blur.brush_flow, "Brush Flow", LensBlur, 1, 100, 100, 1, 0, Plain;
     "profile.amount" => profile.amount, "Amount", Profile, 0, 200, 100, 1, 0, Plain;
     "wb.temp" => wb.temp, "Temp", Color, 2000, 50000, 6500, 50, 0, Temp;
     "wb.tint" => wb.tint, "Tint", Color, -150, 150, 0, 1, 0, Tint;

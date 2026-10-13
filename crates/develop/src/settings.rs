@@ -1079,13 +1079,72 @@ impl Default for RedEye {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LensBlur {
     pub enabled: bool,
     pub amount: f64,
     pub focal_distance: f64,
     pub focal_range: f64,
+    pub bokeh: BokehShape,
+    pub boost: f64,
+    pub mode: FocusMode,
+    pub center: Point,
+    /// Focus ellipse radii relative to the uncropped image width and height.
+    pub radius_x: f64,
+    pub radius_y: f64,
+    pub feather: f64,
+    /// Ordered focus overrides; erase restores blur at the stroke.
+    pub strokes: Vec<BrushStroke>,
+    pub brush_size: f64,
+    pub brush_feather: f64,
+    pub brush_flow: f64,
+    pub brush_auto_mask: bool,
+}
+
+impl Default for LensBlur {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            amount: 0.0,
+            focal_distance: 0.0,
+            focal_range: 0.0,
+            bokeh: BokehShape::Circle,
+            boost: 0.0,
+            mode: FocusMode::Subject,
+            center: Point::new(0.5, 0.5),
+            radius_x: 0.28,
+            radius_y: 0.38,
+            feather: 30.0,
+            strokes: Vec::new(),
+            brush_size: 0.03,
+            brush_feather: 50.0,
+            brush_flow: 100.0,
+            brush_auto_mask: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BokehShape {
+    #[default]
+    Circle,
+    Bubble,
+    FiveBlade,
+    Ring,
+    Oval,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FocusMode {
+    /// Estimate the foreground from colour edges and a focus point, not physical depth.
+    #[default]
+    Subject,
+    Radial,
+    /// Start with a blurred image and paint the areas to keep in focus.
+    Manual,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -17,6 +17,11 @@ use crate::widgets::register;
 /// An in-progress on-canvas gesture.
 #[derive(Clone, Debug)]
 pub enum Gesture {
+    LensBrush {
+        photo: PhotoId,
+        points: Vec<Point>,
+        blur: bool,
+    },
     Brush {
         points: Vec<Point>,
     },
@@ -1267,6 +1272,9 @@ pub(crate) fn view_overlay(app: &LightcraftApp, d: &DevelopSettings) -> lightcra
         return Overlay::Spots(app.ui.spots_threshold.clamp(0.0, 100.0).round() as u8);
     }
     let edit = app.ui.right == RightPanel::Edit;
+    if edit && app.ui.lens_blur_overlay && d.lens_blur.enabled && app.ui.section_open("lensBlur") && d.section_enabled("lensBlur") {
+        return Overlay::LensBlur;
+    }
     if edit && app.ui.point_color_visualize && app.ui.flyout_open("pointColor") && app.ui.point_color < d.point_colors.len() {
         return Overlay::PointColorRange(app.ui.point_color as u8);
     }
@@ -1309,6 +1317,77 @@ fn general_cursor(app: &LightcraftApp, ui: &egui::Ui, resp: &egui::Response, img
     ui.ctx().set_cursor_icon(cursor);
 }
 
+fn lens_blur_interaction(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, map: &CanvasMap) {
+    let Some(id) = app.session.active() else { return };
+    let d = app.session.develop_of(id).unwrap_or_default();
+    if !d.lens_blur.enabled || !d.section_enabled("lensBlur") {
+        return;
+    }
+    if app.ui.tool == "lensBlurPick" {
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if resp.clicked()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let n = map.norm(p);
+            if let Err(e) = app.run("lensBlur.focus", json!({"at": [n.x, n.y]})) {
+                app.toast(ui.ctx(), e);
+            }
+            app.ui.tool.clear();
+        }
+        return;
+    }
+    let b = &d.lens_blur;
+    let base = map.screen(Point::new(0.0, 0.0));
+    let long = base.distance(map.screen(Point::new(1.0, 0.0))).max(base.distance(map.screen(Point::new(0.0, 1.0))));
+    let radius = b.brush_size.clamp(0.002, 0.25) as f32 * long;
+    let blur = (app.ui.tool == "lensBlurBlur") != ui.input(|i| i.modifiers.alt);
+    let tint = if blur { Color32::from_rgba_unmultiplied(70, 150, 255, 80) } else { Color32::from_rgba_unmultiplied(80, 220, 140, 80) };
+    let painter = ui.painter_at(app.canvas_rect.unwrap_or(map.rect));
+    if let Some(p) = resp.hover_pos() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+        painter.circle_stroke(p, radius, Stroke::new(1.5, Color32::WHITE));
+        painter.circle_stroke(p, radius * (1.0 - b.brush_feather as f32 / 100.0).max(0.02), Stroke::new(1.0, tint));
+    }
+    if let Some(q) = resp.interact_pointer_pos()
+        && (resp.drag_started() || resp.dragged() || resp.clicked())
+    {
+        let n = map.norm(q);
+        if (0.0..=1.0).contains(&n.x) && (0.0..=1.0).contains(&n.y) {
+            match &mut app.gesture {
+                Some(Gesture::LensBrush { photo, points, .. }) if *photo == id => {
+                    if points.len() < 2048 && points.last().is_none_or(|p| p.dist(n) > 0.001) {
+                        points.push(n);
+                    }
+                }
+                _ => {
+                    let start = ui
+                        .input(|i| i.pointer.press_origin())
+                        .map(|p| map.norm(p))
+                        .filter(|p| (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y))
+                        .unwrap_or(n);
+                    app.gesture = Some(Gesture::LensBrush { photo: id, points: vec![start, n], blur });
+                }
+            }
+        }
+    }
+    if let Some(Gesture::LensBrush { points, .. }) = &app.gesture {
+        for p in points {
+            painter.circle_filled(map.screen(*p), radius, tint);
+        }
+    }
+    if (resp.drag_stopped() || resp.clicked())
+        && let Some(Gesture::LensBrush { photo, points, blur }) = app.gesture.take()
+        && photo == id
+    {
+        let points: Vec<[f64; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
+        if let Err(e) = app.run("lensBlur.brushStroke", json!({"points": points, "blur": blur})) {
+            app.toast(ui.ctx(), e);
+        }
+    }
+}
+
 fn general_interaction(
     app: &mut LightcraftApp,
     ui: &mut egui::Ui,
@@ -1319,6 +1398,10 @@ fn general_interaction(
     native: [usize; 2],
     aspect: f32,
 ) {
+    if app.ui.right == RightPanel::Edit && app.ui.tool.starts_with("lensBlur") {
+        lens_blur_interaction(app, ui, resp, map);
+        return;
+    }
     if app.ui.tool == "wbPicker" {
         if resp.clicked()
             && let Some(q) = resp.interact_pointer_pos()

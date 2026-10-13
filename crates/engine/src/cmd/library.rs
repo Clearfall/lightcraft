@@ -232,6 +232,17 @@ fn rotate(s: &mut Session, p: &Value, cw: bool) -> Result<Value> {
         if let Some(d) = s.develop_of(id) {
             let mut d = (*d).clone();
             d.orientation = d.orientation.rotated(cw);
+            // Lens-blur coordinates belong to the oriented image, just like the on-canvas tools.
+            let rotate_point = |p: lightcraft_geom::Point| {
+                if cw { lightcraft_geom::Point::new(1.0 - p.y, p.x) } else { lightcraft_geom::Point::new(p.y, 1.0 - p.x) }
+            };
+            d.lens_blur.center = rotate_point(d.lens_blur.center);
+            for stroke in &mut d.lens_blur.strokes {
+                for point in &mut stroke.points {
+                    *point = rotate_point(*point);
+                }
+            }
+            std::mem::swap(&mut d.lens_blur.radius_x, &mut d.lens_blur.radius_y);
             ops.extend(s.develop_op(id, d, "Rotate"));
         }
     }

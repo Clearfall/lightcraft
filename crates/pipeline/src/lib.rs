@@ -30,6 +30,7 @@ pub mod cull;
 pub mod dust;
 pub mod finish;
 pub mod geometry;
+pub mod lens_blur;
 pub mod local;
 pub mod local_tone;
 pub mod lut;
@@ -241,6 +242,7 @@ pub fn frame_for(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, apply_cro
 /// resampling and noise reduction, and so on. Holds the last few output sizes (a draft-size and a
 /// full-size render of the same view both stay warm).
 pub struct StageCache {
+    focus: Mutex<Option<lens_blur::SubjectCache>>,
     entries: Mutex<Vec<CacheEntry>>,
     capacity: usize,
     /// Another renderer's per-view state (the GPU renderer keeps its device-resident stages here).
@@ -249,7 +251,7 @@ pub struct StageCache {
 
 impl Default for StageCache {
     fn default() -> Self {
-        StageCache { entries: Mutex::new(Vec::new()), capacity: 2, ext: Mutex::new(None) }
+        StageCache { focus: Mutex::new(None), entries: Mutex::new(Vec::new()), capacity: 2, ext: Mutex::new(None) }
     }
 }
 
@@ -257,6 +259,7 @@ impl StageCache {
     /// Drop everything (e.g. when memory is needed).
     pub fn clear(&self) {
         self.lock().clear();
+        *self.focus.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.ext.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
@@ -303,6 +306,9 @@ impl StageCache {
             for p in planes.chain(pl.texture.iter().map(|x| &x.1)).chain(pl.dark.iter().map(|x| &x.1)) {
                 add(Arc::as_ptr(p) as usize, size(p));
             }
+        }
+        if let Some(f) = self.focus.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            total += size(&f.plane);
         }
         total
     }
@@ -391,7 +397,8 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     visualize::adjust_settings(req.overlay, &mut settings);
     // a window must not choose a spot's source from the pixels it happens to hold: fix them
     // from a fixed-size render of the whole frame first
-    if req.window.is_some() && settings.spots.iter().any(|sp| sp.source_offset.is_none()) {
+    let whole_frame = lens_blur::active(&settings) || req.overlay == Overlay::LensBlur;
+    if req.window.is_some() && !whole_frame && settings.spots.iter().any(|sp| sp.source_offset.is_none()) {
         let picked: Vec<Option<lightcraft_geom::Point>> =
             settings.spots.iter().map(|sp| sp.source_offset.or_else(|| spots::pick_source(src, info, &settings, sp, None))).collect();
         for (sp, o) in settings.to_mut().spots.iter_mut().zip(picked) {
@@ -406,6 +413,12 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let mut fixed_air = None;
     let mut keep = None;
     let (frame, w, h) = match req.window {
+        Some(win) if whole_frame => {
+            // Keep the convolution grid and surrounding colours identical to a full render.
+            // Cut only after finishing, so overlays do not enter the histogram or deep samples.
+            keep = Some(win.clamped(full_w, full_h));
+            (frame, full_w, full_h)
+        }
         Some(win) => {
             let win = win.clamped(full_w, full_h);
             if s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
@@ -437,6 +450,7 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         // and the local tone mapping
         local_tone::enabled(info, s),
         src_long,
+        lens_blur::key(s),
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
     Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
@@ -514,6 +528,7 @@ pub fn render_cached(src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, 
     render_impl(Src::Shared(src), info, s, req, Some(cache))
 }
 
+#[derive(Clone, Copy)]
 enum Src<'a> {
     Borrowed(&'a Rgb32f),
     Shared(&'a Arc<Rgb32f>),
@@ -538,6 +553,23 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
         Src::Shared(a) => a,
     };
     let plan = plan(src_img, info, s, req);
+    if let Some(win) = plan.keep
+        && (lens_blur::active(s) || req.overlay == Overlay::LensBlur)
+    {
+        let (nw, nh) = plan.frame.native_size();
+        if plan.w > nw.ceil() as usize || plan.h > nh.ceil() as usize {
+            // Above 100%, magnify native pixels instead of allocating the virtual zoom frame.
+            let full = RenderRequest { window: None, max_w: nw.ceil().max(1.0) as usize, max_h: nh.ceil().max(1.0) as usize, ..*req };
+            let mut out = render_impl(src, info, s, &full, cache);
+            let clean = if req.overlay != Overlay::None && req.depth == OutputDepth::U8 {
+                Some(render_impl(src, info, s, &RenderRequest { overlay: Overlay::None, ..full }, cache).image)
+            } else {
+                None
+            };
+            lens_blur::magnify_window(&mut out, clean.as_ref(), win, plan.w, plan.h);
+            return out;
+        }
+    }
     let Plan { ref frame, w, h, px_per_long, src_long, geo, lin_key, .. } = plan;
     let s = &*plan.settings;
 
@@ -545,6 +577,8 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
         (Src::Shared(a), Some(c)) => Some((*a, c)),
         _ => None,
     };
+    let focus =
+        if lens_blur::active(s) || req.overlay == Overlay::LensBlur { lens_blur::cached_subject(src_img, frame, &s.lens_blur, shared) } else { None };
     let cached = shared.and_then(|(a, c)| c.get(a, geo));
     let sampled = match &cached {
         Some(e) => e.sampled.clone(),
@@ -559,6 +593,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
             let mut img = if shared.is_some() { (*sampled).clone() } else { Arc::unwrap_or_clone(sampled.clone()) };
             lin_cpu(&mut img, info, &plan);
             local::denoise(&mut img, s, src_long, frame.output_long(w, h));
+            lens_blur::apply_with_subject(&mut img, src_img, frame, s, focus.as_deref());
             Arc::new(img)
         }
     };
@@ -581,7 +616,10 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
         c.put(CacheEntry { src: a.clone(), geo, sampled, lin: Some((lin_key, lin)), planes });
     }
     if req.depth != OutputDepth::U8 {
-        let deep = finish::finish_deep(&prep, s, frame, info, req.space, req.depth, req.proof);
+        let mut deep = finish::finish_deep(&prep, s, frame, info, req.space, req.depth, req.proof);
+        if let Some(win) = plan.keep {
+            lens_blur::crop_deep(&mut deep, win);
+        }
         let image = deep.to_rgba8();
         let histogram = Histogram::of_srgb8(&image);
         lap("finish (deep)", &mut t);
@@ -602,6 +640,10 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     let mask = overlay_alpha(req.overlay, &plan, &prep);
     let masks = overlay_alphas_all(req.overlay, &plan, &prep);
     visualize::apply(&mut image, req.overlay, &plan, mask.as_ref(), masks.as_deref());
+    if req.overlay == Overlay::LensBlur && s.lens_blur.enabled && s.section_enabled("lensBlur") {
+        let map = lens_blur::focus_map_with_subject(src_img, frame, &s.lens_blur, w, h, focus.as_deref());
+        visualize::mask_view(&mut image, &map, visualize::MaskView::Color, [40, 130, 255], 50);
+    }
     let mut image = if plan.keep.is_some() { cut(&image) } else { image };
     if req.overlay == Overlay::HdrRange && edit.hdr.enabled {
         // the HDR rendition of the same request says how far above SDR white each pixel goes

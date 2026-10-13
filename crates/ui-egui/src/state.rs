@@ -672,6 +672,7 @@ pub struct UiState {
     pub point_color: usize,
     /// Point Color "Visualize range": the selected sample's range in colour, the rest grey.
     pub point_color_visualize: bool,
+    pub lens_blur_overlay: bool,
     /// Light panel "Visualize HDR": grey below SDR white, colour bands above (HDR edits).
     pub hdr_visualize: bool,
     /// Red Eye panel: selected correction, and whether new ones are pet eyes.
@@ -1114,6 +1115,7 @@ impl Default for UiState {
             remove_opacity: 100.0,
             point_color: 0,
             point_color_visualize: false,
+            lens_blur_overlay: false,
             hdr_visualize: false,
             eye: 0,
             eye_pet: false,

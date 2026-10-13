@@ -132,6 +132,7 @@ impl DevelopSettings {
             }
             Section::Color => self.wb.mode = WbMode::AsShot,
             Section::Detail => self.enhance.denoise_on = None,
+            Section::LensBlur => self.lens_blur = LensBlur::default(),
             _ => {}
         }
     }

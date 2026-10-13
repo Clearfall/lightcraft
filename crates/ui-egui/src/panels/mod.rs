@@ -16,6 +16,7 @@ pub mod keymap;
 pub mod keyword_list;
 pub mod keywording;
 pub mod left;
+pub mod lens_blur;
 pub mod library_problem;
 pub mod masking;
 pub mod notices;

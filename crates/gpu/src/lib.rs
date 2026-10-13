@@ -459,6 +459,8 @@ pub fn try_render(
             || req.depth != lightcraft_pipeline::OutputDepth::U8
             || req.proof.is_some()
             || req.overlay == lightcraft_pipeline::Overlay::HdrRange
+            || req.overlay == lightcraft_pipeline::Overlay::LensBlur
+            || lightcraft_pipeline::lens_blur::active(s)
         {
             return Err(Fallback::NotTried);
         }

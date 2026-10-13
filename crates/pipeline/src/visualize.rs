@@ -39,6 +39,8 @@ pub enum Overlay {
     /// Visualize HDR (photos edited in HDR): the SDR image dimmed to grey, with every pixel the HDR
     /// rendition puts above SDR white painted by how far above it is ([`HDR_BANDS`]).
     HdrRange,
+    /// Lens-blur focus map, tinted blue by the CPU renderer.
+    LensBlur,
 }
 
 /// [`Overlay::HdrRange`] colours (sRGB) for 0–1, 1–2, 2–3 and ≥ 3 stops above SDR white.
@@ -125,6 +127,7 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => (3, pack_mask(id, view, color, opacity) as f64),
             Overlay::AllMasks { view, color, opacity } => (5, pack_mask(0, view, color, opacity) as f64),
             Overlay::HdrRange => (4, 0.0),
+            Overlay::LensBlur => (5, 0.0),
         }
     }
 
@@ -143,6 +146,7 @@ impl Overlay {
                     opacity: ((v as u64 >> 44) & 0x7f).min(100) as u8,
                 }
             }
+            5 => Overlay::LensBlur,
             _ => Overlay::None,
         }
     }
@@ -156,6 +160,7 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => 3 << 60 | pack_mask(id, view, color, opacity),
             Overlay::AllMasks { view, color, opacity } => 5 << 60 | pack_mask(0, view, color, opacity),
             Overlay::HdrRange => 0x4000,
+            Overlay::LensBlur => 0x5000,
         }
     }
 
@@ -186,7 +191,7 @@ pub fn adjust_settings(o: Overlay, s: &mut Cow<'_, DevelopSettings>) {
 pub fn apply(img: &mut Rgba8, o: Overlay, plan: &Plan<'_>, mask: Option<&Plane>, masks: Option<&[Plane]>) {
     match o {
         // drawn by the renderer from the HDR rendition ([`hdr_range`])
-        Overlay::None | Overlay::HdrRange => {}
+        Overlay::None | Overlay::HdrRange | Overlay::LensBlur => {}
         Overlay::PointColorRange(i) => {
             if let Some(p) = plan.settings.point_colors.get(i as usize) {
                 point_color_range(img, &PointK::new(p));
