@@ -273,7 +273,7 @@ pub fn base_detail_radius(px_per_long: f64) -> usize {
 pub fn tone_base_detail(s: &DevelopSettings, px_per_long: f64) -> usize {
     match s.process.process() {
         Process::V1 => 0,
-        Process::V2 => base_detail_radius(px_per_long),
+        Process::V2 | Process::V3 => base_detail_radius(px_per_long),
     }
 }
 
@@ -304,10 +304,17 @@ pub struct NrLum {
 pub struct NrColor {
     pub sigma: f32,
     pub t: f32,
+    /// Colour-boundary tolerance; zero selects the frozen V1/V2 Gaussian path.
+    pub range: f32,
+    /// Strength of the wider colour pass under V3.
+    pub smoothness: f32,
 }
 
 /// Noise-reduction parameters at an output long edge of `out_long` px (see [`denoise`]).
 pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Option<NrLum>, Option<NrColor>) {
+    if s.process.process() == Process::V3 {
+        return crate::denoise::params(s, src_long, out_long);
+    }
     let lum = (s.detail.nr_luminance / 100.0) as f32;
     let col = (s.detail.nr_color / 100.0) as f32;
     let scale = (out_long as f32 / src_long.max(1) as f32).clamp(0.05, 1.0);
@@ -318,7 +325,7 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
     let c = (col > 0.0).then(|| {
         let sigma = (1.5 + 6.0 * col) * scale.max(0.35) * (1.0 + (s.detail.nr_color_smoothness / 100.0) as f32);
         let keep = (s.detail.nr_color_detail / 100.0) as f32 * 0.5;
-        NrColor { sigma, t: col * (1.0 - keep) }
+        NrColor { sigma, t: col * (1.0 - keep), range: 0.0, smoothness: 0.0 }
     });
     (l, c)
 }
@@ -344,6 +351,10 @@ pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long:
         if let Some(t) = _t {
             eprintln!("    nr luminance: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
         }
+    }
+    if let Some(nr) = col.filter(|nr| nr.range > 0.0) {
+        crate::denoise::color(img, nr);
+        return;
     }
     if let Some(nr) = col {
         let _t = crate::profiling().then(std::time::Instant::now);

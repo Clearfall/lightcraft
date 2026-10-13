@@ -553,6 +553,40 @@ fn cached_renders_match_uncached() {
     }
 }
 
+#[test]
+fn conventional_denoise_matches_cpu_and_invalidates_caches_across_processes() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(Rgb32f::from_fn(192, 128, |x, y| {
+        let noise = ((x * 7919 + y * 104729) % 97) as f32 / 96.0 - 0.5;
+        let v = if x < 96 { 0.12 } else { 0.25 };
+        [v + noise * 0.05, v - noise * 0.01, v + noise * 0.02]
+    }));
+    let info = SourceInfo::default();
+    let req = RenderRequest::fit(192, 128);
+    let cache = StageCache::default();
+    let mut previous = None;
+    for process in [Process::V2, Process::V3, Process::V2, Process::V3] {
+        let mut s = DevelopSettings { process: process.version(), ..Default::default() };
+        s.detail.nr_luminance = 75.0;
+        s.detail.nr_color = 40.0;
+        for (contrast, detail, smoothness) in [(0.0, 50.0, 50.0), (100.0, 50.0, 50.0), (100.0, 100.0, 50.0), (100.0, 100.0, 100.0)] {
+            s.detail.nr_contrast = contrast;
+            s.detail.nr_color_detail = detail;
+            s.detail.nr_color_smoothness = smoothness;
+            check("conventional NR", &src, &info, &s, &req);
+            let warm = lightcraft_gpu::render(&src, &info, &s, &req, Some(&cache)).expect("gpu").image;
+            let fresh = lightcraft_gpu::render(&src, &info, &s, &req, None).expect("gpu").image;
+            assert!(warm == fresh, "NR cache did not invalidate");
+            if process == Process::V3 && contrast == 100.0 && detail == 50.0 {
+                assert!(previous.as_ref().is_some_and(|image| *image != warm), "contrast made no visible difference");
+            }
+            previous = Some(warm);
+        }
+    }
+}
+
 /// Issue #632: the Highlights / Shadows base of each process (V1: the edge-aware filter of log
 /// luminance; V2: of its fine median, a radius that grows with the render) matches the CPU's, and
 /// a warm cache never hands one process the other's base.

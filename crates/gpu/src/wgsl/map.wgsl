@@ -226,3 +226,59 @@ fn redeye_k(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups
     }
     put_rgb(i, c);
 }
+
+
+// Process V3 colour guide: normalized RGB and luminance of a small preblur.
+fn nr_chromaticity(v: vec3<f32>) -> vec3<f32> {
+    return v / max(v.x + v.y + v.z, 1e-8);
+}
+
+@compute @workgroup_size(256)
+fn nr_guide_v3(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {
+    let i = lin_index(g, nw);
+    if (i >= pu(0u)) { return; }
+    let p = rgb_a(i);
+    let ch = nr_chromaticity(p);
+    dst[4u * i] = ch.x;
+    dst[4u * i + 1u] = ch.y;
+    dst[4u * i + 2u] = ch.z;
+    dst[4u * i + 3u] = max(lum2020(p), 0.0);
+}
+
+fn nr_guide_at(i: u32) -> vec4<f32> {
+    return vec4<f32>(b[4u*i], b[4u*i+1u], b[4u*i+2u], b[4u*i+3u]);
+}
+
+// One edge-aware chroma pass. P[1..5]: width, height, tap step, amount, range.
+@compute @workgroup_size(256)
+fn nr_color_v3(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {
+    let i = lin_index(g, nw);
+    if (i >= pu(0u)) { return; }
+    let w = pu(1u);
+    let h = pu(2u);
+    let step = i32(pu(3u));
+    let center = nr_guide_at(i);
+    let range = pf(5u) * clamp(sqrt(0.2 / (center.w + 0.02)), 1.0, 3.0);
+    var acc = vec3<f32>(0.0);
+    var sum = 0.0;
+    for (var dy = -2; dy <= 2; dy++) {
+        for (var dx = -2; dx <= 2; dx++) {
+            let x = u32(clamp(i32(i % w) + dx * step, 0, i32(w)-1));
+            let y = u32(clamp(i32(i / w) + dy * step, 0, i32(h)-1));
+            let j = y * w + x;
+            let neighbor = nr_guide_at(j);
+            let delta = center.xyz - neighbor.xyz;
+            let ld = (center.w - neighbor.w) / (center.w + neighbor.w + 0.01);
+            let d = dot(delta, delta) / (range * range) + ld * ld * 16.0;
+            let spatial = 1.0 / (1.0 + f32(dx*dx + dy*dy));
+            let weight = spatial / ((1.0+d)*(1.0+d));
+            acc += weight * nr_chromaticity(rgb_a(j));
+            sum += weight;
+        }
+    }
+    let original = rgb_a(i);
+    let c0 = nr_chromaticity(original);
+    let cb = c0 + (acc / max(sum, 1e-8) - c0) * pf(4u);
+    let gain = max(lum2020(original), 0.0) / max(lum2020(cb), 1e-8);
+    put_rgb(i, max(cb * gain, vec3<f32>(0.0)));
+}

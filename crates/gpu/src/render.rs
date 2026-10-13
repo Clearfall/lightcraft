@@ -806,6 +806,21 @@ fn denoise(cx: &mut Cx<'_>, img: Buf, plan: &Plan<'_>) -> Buf {
         map(cx, "nr_lum", n, &[nr.k.to_bits()], [Some(&img), Some(&l), Some(&f)], &out);
         img = out;
     }
+    if let Some(nr) = col.filter(|nr| nr.range > 0.0) {
+        let blurred = gaussian(cx, &img, w, h, 3, 0.8);
+        let guide = cx.gpu.buffer(n * 4);
+        map(cx, "nr_guide_v3", n, &[], [Some(&blurred), None, None], &guide);
+        for (step, t) in [(1, nr.t), (nr.sigma.round().max(1.0) as u32, nr.t * nr.smoothness)] {
+            if t <= 0.0 {
+                continue;
+            }
+            let out = cx.gpu.buffer(n * 3);
+            let p = [w as u32, h as u32, step, t.to_bits(), nr.range.to_bits()];
+            map(cx, "nr_color_v3", n, &p, [Some(&img), Some(&guide), None], &out);
+            img = out;
+        }
+        return img;
+    }
     if let Some(nr) = col {
         let chroma = cx.gpu.buffer(n * 3);
         map(cx, "chroma_k", n, &[], [Some(&img), None, None], &chroma);

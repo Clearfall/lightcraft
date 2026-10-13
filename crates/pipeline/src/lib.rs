@@ -27,6 +27,7 @@ pub mod auto;
 pub mod blemish;
 pub mod colorops;
 pub mod cull;
+pub mod denoise;
 pub mod dust;
 pub mod finish;
 pub mod geometry;
@@ -438,7 +439,11 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         local_tone::enabled(info, s),
         src_long,
     ));
-    let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
+    let lin_key = hash_of((
+        pre_nr_key,
+        s.process.process(),
+        [d.nr_luminance, d.nr_detail, d.nr_contrast, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits),
+    ));
     Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
 }
 
@@ -693,6 +698,8 @@ mod tests_geometry;
 mod tests_hdr;
 #[cfg(test)]
 mod tests_local;
+#[cfg(test)]
+mod tests_nr_contrast;
 #[cfg(test)]
 mod tests_tone;
 #[cfg(test)]
