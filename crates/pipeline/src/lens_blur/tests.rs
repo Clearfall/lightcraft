@@ -212,6 +212,7 @@ fn lens_blur_and_hdr_overlays_have_distinct_worker_and_cache_ids() {
     assert_ne!(a.key(), b.key());
     assert_ne!(a.to_parts(), b.to_parts());
     let (kind, value) = a.to_parts();
+    assert_eq!(kind, 6, "worker kind 5 belongs to upstream AllMasks");
     assert_eq!(crate::Overlay::from_parts(kind, value), a);
 }
 

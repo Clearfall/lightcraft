@@ -127,7 +127,8 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => (3, pack_mask(id, view, color, opacity) as f64),
             Overlay::AllMasks { view, color, opacity } => (5, pack_mask(0, view, color, opacity) as f64),
             Overlay::HdrRange => (4, 0.0),
-            Overlay::LensBlur => (5, 0.0),
+            // Kind 5 is reserved by the upstream AllMasks overlay.
+            Overlay::LensBlur => (6, 0.0),
         }
     }
 
@@ -146,7 +147,7 @@ impl Overlay {
                     opacity: ((v as u64 >> 44) & 0x7f).min(100) as u8,
                 }
             }
-            5 => Overlay::LensBlur,
+            6 => Overlay::LensBlur,
             _ => Overlay::None,
         }
     }
@@ -160,7 +161,7 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => 3 << 60 | pack_mask(id, view, color, opacity),
             Overlay::AllMasks { view, color, opacity } => 5 << 60 | pack_mask(0, view, color, opacity),
             Overlay::HdrRange => 0x4000,
-            Overlay::LensBlur => 0x5000,
+            Overlay::LensBlur => 0x6000,
         }
     }
 
